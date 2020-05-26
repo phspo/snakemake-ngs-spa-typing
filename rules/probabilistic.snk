@@ -1,0 +1,163 @@
+rule compareExpectedKmerProfileToTrueProfile:
+    input:
+        trueCounts = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/{kmer}/correctCounts.json',
+        expectedCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
+        groundTruthFile = 'data/input/' + config['ground_truth']
+    output:
+        differences = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/{kmer}/differences_expected.txt'
+    params:
+        inputFileID = lambda wildcards: wildcards.id
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/compareKmerCounts_expected.py'
+
+rule calcPriorProbabilities:
+    input:
+        likelihoods = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/likelihoods.json'
+    output:
+        priorFilePath = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/prior.txt'
+    params:
+        k = lambda wildcards: wildcards.kmer,
+        dps = config['dps'],
+        cpus = '1',
+        mem = '1G',
+        gpus = '0',
+        walltime = '00:05:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    log:
+        'logs/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/calcPrior.log'
+    script:
+        '../scripts/calcPriorProbabilities.py'
+
+
+rule calcProbabilities:
+    input:
+        likelihoods = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/likelihoods.json',
+        prior = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/prior.txt'
+    output:
+        probabilities = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/scores.probabilistic_gen.tsv'
+    params:
+        dps = config['dps'],
+        cpus = '1',
+        mem = '4G',
+        gpus = '0',
+        walltime = '00:05:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    log:
+        'logs/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/probabilities.log'
+    script:
+        '../scripts/calcSpaTypeProbabilities.py'
+
+
+
+
+def extractTsvValue(filePath,line,nolabels=False):
+    with open(filePath,'r') as infile:
+        lines = infile.read().splitlines();
+        return lines[line].split('\t')[0] if nolabels else lines[line].split('\t')[1]
+
+
+rule calcLikelihoods:
+    input:
+        expected = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
+        observed = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+        kmerError = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/kmer_error.txt',
+        kmerCoverageEstimate = determineKmerCoverageEstimateFile()
+    output:
+        likelihoods = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/likelihoods_cov.json',
+        unexpectedLikelihoods = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/unexpected_likelihoods_cov.json'
+        #diffs = 'data/auxiliary/kmers/{kmer}/{id}/kmer_diff.tsv'
+    log:
+        'logs/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/likelihoods_cov.log'
+    benchmark:
+        'benchmarks/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/calcLikelihoodsCoverageBasedModel.txt'
+    params:
+        e = (lambda wildcards,input : extractTsvValue(input.kmerError,0)),
+        deviationCutoff = (lambda wildcards,input : round(config['deviationCutoff']*extractCoverageEstimateFile(input.kmerCoverageEstimate,config))),
+        #cluster exectuion
+        cpus = '1',
+        mem = '4G',
+        gpus = '0',
+        walltime = '01:30:00'
+    singularity:
+        'docker://phspo/ckmertools:latest'
+    shell:
+        'c_kmertools --e {input.expected} --c {params.cpus} --m 0 --o {input.observed} --kmererror {params.e} --d {params.deviationCutoff} --target {output.likelihoods} --unexpected {output.unexpectedLikelihoods} --log {log}'
+
+
+rule calcLikelihoods_Generative:
+    input:
+        counts = 'data/auxiliary/kmers/{kmer}/spaSequences.counts.json',
+        observed = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+        baseError = 'data/auxiliary/'+config['input_folder']+'/{id}/base_error_estimate.txt'
+    output:
+        likelihoods = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/likelihoods.json'
+    params:
+        cpus = '1',
+        mem = '3G',
+        gpus = '0',
+        walltime = '24:00:00',
+        #cluster execution
+        k = lambda wildcards: wildcards.kmer,
+        e = lambda wildcards,input : extractTsvValue(input.baseError,0,True)
+    singularity:
+        'docker://phspo/ckmertools:latest'
+    log:
+        'logs/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/likelihoods.log'
+    benchmark:
+        'benchmarks/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/calcLikelihoodsGenerativeModel.txt'
+    shell:
+        'c_kmertools --p {input.counts} --m 1 --c {params.cpus} --o {input.observed} --baseerror {params.e} --k {params.k} --target {output.likelihoods} --log {log}'
+
+rule estimateErrorRates:
+    input:
+        read1 = 'data/auxiliary/'+config['input_folder']+'/{id}'+'.qc'+config['input_read_1_ending'],
+        read2 = 'data/auxiliary/'+config['input_folder']+'/{id}'+'.qc'+config['input_read_2_ending']
+    output:
+        baseError = 'data/auxiliary/'+config['input_folder']+'/{id}/base_error_estimate.txt'
+    log:
+        'logs/'+config['input_folder']+'/kmers/{id}/estimateErrorRates.log'
+    params:
+        # cluster execution
+        cpus = '1',
+        mem = '32G',
+        gpus = '0',
+        walltime = '00:30:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/estimateErrorRates.py'
+
+'''
+rule calcAverageCoverage:
+    input:
+        alignment = 'data/auxiliary/{id}/alignment.sorted.bam'
+    output:
+        'data/auxiliary/{id}/averageCoverage.depth'
+    conda:
+        '../envs/main.yaml'
+    shell:
+        'samtools mpileup -B -d 10000 -q0 -Q0 -r maskref {input.alignment}  > {output}'
+'''
+
+####DEBUG RULES#####
+rule calcKmerStats:
+    input:
+        expected = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
+        observed = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+        error = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/error_estimate.txt',
+        coverage_estimate = determineKmerCoverageEstimateFile()
+    output:
+        stats = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/stats.tsv'
+    params:
+        id = lambda wildcards: wildcards.id,
+        k = lambda wildcards: wildcards.kmer
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    log:
+        'logs/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/probabilities.log'
+    script:
+        '../scripts/calcKmerStats.py'

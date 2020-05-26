@@ -1,0 +1,29 @@
+rule detectDuplicates_repeats:
+	input:
+		repeats = 'data/input/'+config['spa_repeats_file']
+	output:
+		out = 'data/output/duplicate_repeats'
+	conda:
+		'envs/biopythonworkbench.yaml'
+	script:
+		'scripts/searchDuplicates.py'
+		
+rule detectDuplicates_sequences:
+	input:
+		repeats = 'data/auxiliary/spaSequences.fa'
+	output:
+		out = 'data/output/duplicate_sequences'
+	conda:
+		'envs/main.yaml'
+	script:
+		'scripts/searchDuplicates.py'
+				
+rule detectDuplicates_definitions:
+	input:
+		types = 'data/input/'+config['spa_types']
+	output:
+		out = 'data/output/duplicate_definitions'
+	conda:
+		'envs/biopythonworkbench.yaml'
+	script:
+		'scripts/searchDuplicateDefinitions.py'

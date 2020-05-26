@@ -1,0 +1,16 @@
+rule distance:
+    input:
+        readProfile = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.profile.json',
+        spaProfiles = 'data/auxiliary/kmers/{kmer}/spaSequences.kmerprofiles.json'
+    output:
+        'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/scores.euclidean.tsv'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    params:
+        # cluster execution
+        cpus = '1',
+        mem = '4G',
+        gpus = '0',
+        walltime = '00:10:00'
+    script:
+        '../scripts/kmerdiff.py'

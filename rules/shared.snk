@@ -1,0 +1,149 @@
+rule qualityControl:
+	input:
+		read1 = 'data/input/'+config['input_folder']+'/{id}'+config['input_read_1_ending'],
+		read2 = 'data/input/'+ config['input_folder'] + '/{id}' + config['input_read_2_ending']
+	output:
+		read1 = 'data/auxiliary/'+config['input_folder']+'/{id}'+'.qc'+config['input_read_1_ending'],
+		read2= 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_2_ending'],
+		jsonreport = 'data/auxiliary/' + config['input_folder'] + '/qc/{id}' + '.json',
+		htmlreport = report('data/auxiliary/' + config['input_folder'] + '/qc/{id}' + '.html',category='Preprocessing',caption='../report/qualityControl.rst')
+	params:
+		# cluster execution
+		cpus = '1',
+		mem = '32G',
+		gpus = '0',
+		walltime = '00:15:00'
+	log:
+		'logs/' + config['input_folder'] + '/{id}/qualityControl.log'
+	conda:
+		'../envs/fastp.yaml'
+	shell:
+		'fastp -i {input.read1} -I {input.read2} -o {output.read1} -O {output.read2} -h {output.htmlreport} -j {output.jsonreport} > {log}'
+
+
+if config['useSubset']:
+
+	rule spaTypesToSequences:
+		input:
+			repeats = 'data/input/' + config['spa_repeats_file'],
+			types = 'data/input/' + config['spa_types'],
+			filterList = 'data/input/'+config['subsetFile']
+		output:
+			out = 'data/auxiliary/spaSequences.fa'
+		params:
+			# cluster execution
+			cpus = '1',
+			mem = '32G',
+			gpus = '0',
+			walltime = '00:15:00'
+		conda:
+			'../envs/biopythonworkbench.yaml'
+		script:
+			'../scripts/spaTypesToSequences.py'
+else:
+
+	rule spaTypesToSequences:
+		input:
+			repeats = 'data/input/' + config['spa_repeats_file'],
+			types = 'data/input/' + config['spa_types']
+		output:
+			out = 'data/auxiliary/spaSequences.fa'
+		params:
+			# cluster execution
+			cpus = '1',
+			mem = '32G',
+			gpus = '0',
+			walltime = '00:15:00'
+		conda:
+			'../envs/biopythonworkbench.yaml'
+		script:
+			'../scripts/spaTypesToSequences.py'
+
+
+rule index_bwa:
+	input:
+		'{any}.bam'
+	output:
+		'{any}.bam.bai'
+	params:
+		# cluster execution
+		cpus = '1',
+		mem = '32G',
+		gpus = '0',
+		walltime = '00:15:00'
+	conda:
+		'../envs/biopythonworkbench.yaml'
+	shell:
+		'samtools index {input}'
+
+
+
+rule createBWAMemIndex:
+	input:
+		'{any}.fa'
+	output:
+		 '{any}.fa.bwt'
+	params:
+		# cluster execution
+		cpus = '1',
+		mem = '32G',
+		gpus = '0',
+		walltime = '00:15:00'
+	singularity:
+		'docker://biocontainers/bwa:v0.7.17-3-deb_cv1'
+	shell:
+		'bwa index {input}'
+
+rule sort_bwa:
+	input:
+		'{any}.bam'
+	output:
+		'{any}.sorted.bam'
+	params:
+		# cluster execution
+		cpus = '1',
+		mem = '16G',
+		gpus = '0',
+		walltime = '00:15:00'
+	conda:
+		'../envs/biopythonworkbench.yaml'
+	shell:
+		'samtools sort {input} -o {output} -m 4G' #TODO 4 G limitation needed?
+
+
+
+rule summarize:
+	input:
+		results = expand('data/auxiliary/'+config['input_folder']+'/kmers/{{kmer}}/{id}/scores.{{mode}}.tsv',id=inputIDs)
+	output:
+		summary = report('data/output/'+config['input_folder']+'/kmers/{kmer}/predictions.{mode}.tsv',category="Spa-Type Predictions",caption="../report/prediction.snk")
+	params:
+		# cluster execution
+		cpus = '1',
+		mem = '8G',
+		gpus = '0',
+		walltime = '00:05:00'
+	conda:
+		'../envs/biopythonworkbench.yaml'
+	script:
+		'../scripts/summarize.py'
+
+rule metaSummarize:
+	input:
+		summary = expand('data/output/'+config['input_folder']+'/kmers/{kmer}/predictions.{{mode}}.tsv',kmer=kmer_lengths),
+		groundTruth = 'data/input/' + config['ground_truth']
+	output:
+		meta = 'data/output/'+config['input_folder']+'/metaSummary.{mode}.tsv'
+	params:
+		# cluster execution
+		cpus = '1',
+		mem = '8G',
+		gpus = '0',
+		walltime = '00:05:00'
+	conda:
+		'../envs/biopythonworkbench.yaml'
+	log:
+		'logs/'+config['input_folder']+'/metaSummary.{mode}.log'
+	script:
+		'../scripts/metaSummarize.py'
+

@@ -1,0 +1,19 @@
+$schema: "http://json-schema.org/draft-04/schema#"
+
+description: snakemake config file
+
+properties:
+  input_folder:
+    type: string
+    description: the input folder, in which the reads that are to be classified are located
+  input_read_1_ending:
+    type: string
+    description: the file ending for the first read (paired-end)
+  input_read_2_ending:
+    type: string
+    description: the file ending for the second read (paired-end)
+
+required:
+  - input_folder
+  - input_read_1_ending
+  - input_read_2_ending

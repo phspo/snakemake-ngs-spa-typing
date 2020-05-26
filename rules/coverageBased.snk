@@ -1,0 +1,162 @@
+rule estimateKmerCoverage:
+    input:
+        read1 = 'data/auxiliary/'+config['input_folder']+'/{id}'+'.qc'+config['input_read_1_ending'],
+        read2 = 'data/auxiliary/'+config['input_folder']+'/{id}'+'.qc'+config['input_read_2_ending']
+    output:
+        histogram = report('data/output/' + config['input_folder'] + '/kmers/{kmer}/{id}/kmers.histo.png',category='Coverage-Based Method',caption='../report/kmerCoverageHistogram.rst'),
+        histogramRaw = 'data/auxiliary/' + config['input_folder'] + '/kmers/{kmer}/{id}/kmers.histo.raw.png',
+        mean = 'data/auxiliary/' + config['input_folder'] + '/kmers/{kmer}/{id}/coverage_estimate_kmercountbased.txt',
+        kmererror = 'data/auxiliary/' + config['input_folder'] + '/kmers/{kmer}/{id}/kmer_error.txt'
+    params:
+        k = lambda wildcards: wildcards.kmer,
+        #cluster execution
+        cpus = '1', #TODO: This could in theory be sped up significantly using a shared cache and multithreading
+        gpus = '0',
+        mem = '64G',
+        walltime = '00:45:00'
+    log:
+        'logs/' + config['input_folder'] + '/kmers/{kmer}/{id}/estimateKmerCoverage.log'
+    benchmark:
+        'benchmarks/' + config['input_folder'] + '/kmers/{kmer}/{id}/estimateKmerCoverage.log'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/estimateKmerCoverage.py'
+
+
+'''
+rule estimateKmerCoverageFiltered:
+    input:
+        reads = 'data/auxiliary/'+config['input_folder']+'/{id}/filteredReads.fastq'
+    output:
+        histogram = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/kmers.histo.regionXOnly.png'
+    params:
+        k = lambda wildcards: wildcards.kmer
+    #TODO: Threads = 2 ?
+    log:
+        'logs/'+config['input_folder']+'/kmers/{kmer}/{id}/estimateKmerCoverageFiltered.log'
+    conda:
+        '../envs/main.yaml'
+    script:
+        '../scripts/estimateKmerCoverageFiltered.py'
+'''
+
+
+rule estimateKmerCoverageAlignment:
+    input:
+        coverageEstimate = 'data/auxiliary/'+config['input_folder']+'/{id}/coverageEstimate.txt',
+        readLengthEstimate = 'data/auxiliary/'+config['input_folder']+'/{id}/readLengthEstimate.txt',
+        baseErrorEstimate = 'data/auxiliary/'+config['input_folder']+'/{id}/base_error_estimate.txt'
+    output:
+        kmerCoverage = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/coverage_estimate_alignmentbased.txt'
+    params:
+        k = lambda wildcards: wildcards.kmer,
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '16G',
+        walltime = '00:30:30'
+    log:
+        'logs/'+config['input_folder']+'/kmers/{kmer}/{id}/estimateKmerCoverage.log'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/estimateKmerCoverage_alignment.py'
+
+rule estimateCoverageAlignment:
+    input:
+        filteredAlignment = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.sorted.bam'
+    output:
+        coverageEstimate = 'data/auxiliary/'+config['input_folder']+'/{id}/coverageEstimate.txt'
+    params:
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '16G',
+        walltime = '00:30:30'
+    log:
+        'logs/'+config['input_folder']+'/{id}/estimateKmerCoverage_alignment.log'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    shell:
+        'samtools depth  {input.filteredAlignment} |  awk \' $1 == "maskref" {{sum+=$3}} END {{ print "Average = ",sum/NR}}\' | grep -Eo \'[+-]?[0-9]+([.][0-9]+)?\' > {output.coverageEstimate}'
+
+rule calcPriorProbabilitiesCoverage:
+    input:
+        likelihoods = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/likelihoods_cov.json'
+    output:
+        priorFilePath = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/prior_cov.txt'
+    params:
+        k = lambda wildcards: wildcards.kmer,
+        dps = config['dps'],
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '2G',
+        walltime = '00:05:30'
+    log:
+        'logs/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/calcPrior_cov.log'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/calcPriorProbabilities.py'
+
+rule calcProbabilitiesCoverage:
+    input:
+        likelihoods = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/likelihoods_cov.json',
+        prior = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/prior_cov.txt'
+    output:
+        probabilities = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/scores.probabilistic_cov.tsv'
+    params:
+        dps = config['dps'],
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '8G',
+        walltime = '00:10:30'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    log:
+        'logs/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/probabilities_cov.log'
+    script:
+        '../scripts/calcSpaTypeProbabilities.py'
+
+
+rule createFitnessPlots:
+    input:
+        counts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+        probabilities = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/scores.probabilistic_cov.tsv',
+        ratios = 'data/auxiliary/kmers/{kmer}/spaSequencesRatios.json'
+    output:
+        report('data/output/'+config['input_folder']+'/kmers/{kmer}/{id}_top3fit.svg',category='Coverage-Based Method',caption='../report/fitnessPlot.rst')
+    params:
+        dps = config['dps'],
+        # cluster execution
+        cpus = '1',
+        gpus = '0',
+        mem = '1G',
+        walltime = '00:20:30'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/createFitnessPlots.py'
+
+
+rule calcExpectedCounts:
+    input:
+        kmerCoverageEstimate = determineKmerCoverageEstimateFile(),
+        counts = 'data/auxiliary/kmers/{kmer}/spaSequences.counts.json'
+    output:
+        'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json'
+    params:
+        k = lambda wildcards: wildcards.kmer,
+        # cluster execution
+        cpus = '1',
+        mem = '8G',
+        gpus = '0',
+        walltime = '00:30:00' 
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/calcExpectedCounts.py'
+

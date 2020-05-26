@@ -1,0 +1,97 @@
+###Static Files
+
+#Repeat definitions (as downloaded from ridom spa server), relative to data/input
+spa_repeats_file : sparepeats.fasta
+
+#Spa-type definitions (as downloaded from ridom spa server), relative to data/input
+spa_types : spatypes.txt
+
+#If true only a subset of spa-types is used (this can be useful if you only want to decide between certain types)
+useSubset : False
+
+#A list of comma separated spa-types that should be considered for the analysis
+#We included one file containing the 100 most common spa-types in the repository as a demo
+subsetFile: top_01_04_2020.csv
+
+###Prediction Modes
+
+#Poisson-Based Model: Recommended
+probabilistic_model : True
+#Generative Model
+generative_model : False
+#Euclidean Distance Model
+distance_model : False
+#Assembly based mode, experimental and not recommended
+assembly_model : False 
+
+
+###Reference Genome
+reference_genome : NCTC8325
+genome_file_identifier : genome.fa #NCTC8325
+#genome_file_identifier : genome.fna 
+protein_table_identifier : protein.table
+
+reference_guided_assembly : False
+
+reference_genome_table_index_organism_id : 6 #NCTC8325
+reference_genome_table_index_start_pos : 7 #H-EMRSA-15 #NCTC8325
+reference_genome_table_index_end_pos : 8 #H-EMRSA-15 #NCTC8325
+reference_genome_table_index_strand : 9 #H-EMRSA-15 #NCTC8325
+reference_genome_table_index_protein_id : 13 #H-EMRSA-15 #NCTC8325
+
+protein_a_identifier : protein A #NCTC8325
+l_lactate_permease_identifier : L-lactate permease #NCTC8325
+arlp_identifier : accessory regulator-like protein #NCTC8325
+
+input_folder : test
+input_read_1_ending : _1.fq
+input_read_2_ending : _2.fq
+
+### Method Analysis
+
+# Calculate the strand bias based on alignments
+calc_strand_bias : False
+
+### Ground Truth Analysis
+
+#A tab-separated file where column 1 contains the sample name and column 2 the correct spa-type
+ground_truth : groundTruth.example.tsv
+#Map the filtered (assumed X region) reads against the ground truth reference
+map_filtered_reads : False
+#Only works for simulated reads with wgsim: Analyzes how many reads got correctly mapped to the X region
+mapping_diff_analysis: False
+
+### k-mer Approach
+
+kmers: [38]
+#Test whether k-mers are unique to the Protein A region for the given k. This can be used as an indicator when the skipMapping option could be viable
+verifyUniqueness : False
+
+kmer_stats_analysis : False
+
+#The precision that is used for log-space additions and other high precision requiring math operations
+dps : 100
+
+### Coverage-Based Method
+
+#Determine which method is used for k-mer coverage estimation
+#This affects only the COV method
+#alignment -> k-mer coverage is estimated based on read coverage found in an alignment to a reference genome
+#countPeak -> k-mer coverage is based on a k-mer frequency histogram where a poisson-distribution is assumed and the first peak (after cutting off error k-mers) is believed to be the single k-mer coverage
+#countMean -> k-mer coverage is based on a k-mer frequency histogram where the average k-mer coverage is estimated by the mean of k-mer frequencies (again, cutting off error k-mers)
+kmerCoverageEstimationMethod : countPoisson
+
+#when calclating probabilities based on COV method, skip a tpye as soon as the deviation between expected and observed exceeds (deviationCutoff*kmerCoverageEstimate) for any k-mer
+deviationCutoff : 2.5
+#likelihoods exceeding this value are not taken into account when calculating a prior
+#likelihoodCutoff : -50000
+#If the k chosen is sufficiently large, k-mers can be unique to the protein A region. In this case mapping can be skipped and all k-mers detected in the reads can be assumed to have originated from the protein A region. The skipMapping option skips the entire mapping process and generates k-mer profiles for the input data directly from the reads. 
+#This applies to the methods: COV and EUC, the method GEN is unaffected by this
+skipMapping: False
+plot_top3_fit : False
+
+###Blast Parameter
+blast_word_size : 4
+blast_word_size_hypProtA : 11
+blast_e_value : 1.0e-40
+blast_e_value_hypProtA : 1.0e-50

@@ -1,0 +1,437 @@
+# Returns the correct filename in which the required information is stored depending on the configuration setting
+def determineKmerCoverageEstimateFile():
+    if config['kmerCoverageEstimationMethod'] == 'alignment':
+        return 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/coverage_estimate_alignmentbased.txt'
+    elif config['kmerCoverageEstimationMethod'] == 'countMean':
+        return 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/coverage_estimate_kmercountbased.txt'
+    elif config['kmerCoverageEstimationMethod'] == 'countPoisson':
+        return 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/coverage_estimate_kmercountbased.txt'
+
+# Returns the corresponding ground truth spa-type for a given file (sample) id
+def getGroundTruthType(fid):
+    with open('data/input/groundTruth.tsv','r') as gtfile:
+
+        for l in gtfile.read().splitlines():
+            data = l.split('\t')
+            if data[0] == fid:
+                return data[1]
+        else:
+            raise WorkflowError("Can't find {} in ground truth file ... check that an entry exists!".format(fid))
+
+### Mapping ###
+
+rule extractMaskedReferenceGenome:
+    input:
+        refg = 'data/input/'+config['reference_genome']+'/'+config['genome_file_identifier'],
+        pt = 'data/input/'+config['reference_genome']+'/'+config['protein_table_identifier']
+    output:
+        main = 'data/auxiliary/maskedRef.fa'
+    params:
+        pid = config['protein_a_identifier'],
+        #cluster execution
+        cpus = '1',
+        mem = '8G',
+        gpus = '0',
+        walltime = '00:05:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/maskProteinA.py'
+
+rule createSyntheticProteinAs:
+    input:
+        proteinAFrame = 'data/input/proteinAFrame.ref',
+        spaSequences = 'data/auxiliary/spaSequences.fa'
+    output:
+        seqs = 'data/auxiliary/syntheticProteinAs.fa',
+        metaInf = 'data/auxiliary/syntheticProteinAs.meta'
+    params:
+        #cluster execution
+        cpus = '1',
+        mem = '8G',
+        gpus = '0',
+        walltime = '00:05:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/createSyntheticProteinAs.py'
+        
+rule concatRelevantSequences:
+    input:
+        synth = 'data/auxiliary/syntheticProteinAs.fa',
+        masked = 'data/auxiliary/maskedRef.fa'
+    output:
+        'data/auxiliary/matchBoard.fa'
+    params:
+        #cluster execution
+        cpus = '1',
+        mem = '8G',
+        gpus = '0',
+        walltime = '00:02:00'
+    shell:
+        'cat {input.masked} {input.synth} > {output}'
+        
+rule bwa:
+    input:
+        bwi = 'data/auxiliary/matchBoard.fa.bwt',
+        mb = 'data/auxiliary/matchBoard.fa',
+        read1 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_1_ending'],
+        read2 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_2_ending']
+    output:
+        'data/auxiliary/'+config['input_folder']+'/{id}/alignment.bam'
+    params:
+        #cluster execution
+        cpus = '1',
+        mem = '32G',
+        gpus = '0',
+        walltime = '00:30:00'
+    singularity:
+        'docker://biocontainers/bwa:v0.7.17-3-deb_cv1'
+    shell:
+        'bwa mem {input.mb} {input.read1} {input.read2} -o {output}'
+        #'bwa mem {input.mb} {input.read1} -o {output}'
+        
+
+
+rule determineStrandBias:
+    input:
+        alignment = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.sorted.bam',
+        idx =	'data/auxiliary/'+config['input_folder']+'/{id}/alignment.sorted.bam.bai'
+    output:
+        strandbias = report('data/output/'+config['input_folder']+'/{id}/strandbias.txt',category='Strand Bias')
+    params:
+        #cluster execution
+        cpus = '1',
+        mem = '32G',
+        gpus = '0',
+        walltime = '00:30:00'	
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/determineStrandBias.py'
+
+
+
+rule filter_primary_matches:
+    input:
+        alignment = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.sorted.bam',
+        whitelist = 'data/auxiliary/syntheticProteinAs.meta'
+    output:
+        'data/auxiliary/'+config['input_folder']+'/{id}/alignment.filtered.bam'
+    params:
+        #cluster execution
+        cpus = '1',
+        mem = '16G',
+        gpus = '0',
+        walltime = '00:10:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    shell:
+        'samtools view -F 4 {input.alignment} -L {input.whitelist} -b > {output}'
+
+rule determineFilteredStrandBias:
+    input:
+        alignment = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.filtered.bam',
+        idx = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.filtered.bam.bai'
+    output:
+        strandbias = 'data/auxiliary/'+config['input_folder']+'/{id}/strandbias.filtered.txt'
+    params:
+        #cluster execution
+        cpus = '1',
+        mem = '16G',
+        gpus = '0',
+        walltime = '00:30:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/determineStrandBias.py'	
+
+rule extractFilteredReadsAsFastQ:
+    input:
+        filteredAlignment = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.filtered.bam'
+    output:
+        filteredReads = 'data/auxiliary/'+config['input_folder']+'/{id}/filteredReads.fastq'
+    params:
+        #cluster execution
+        cpus = '1',
+        mem = '8G',
+        gpus = '0',
+        walltime = '00:10:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    shell:
+        'samtools fastq {input.filteredAlignment} > {output.filteredReads}'
+
+
+
+
+rule createKmerDistributionGroundTruth_COVERAGE_BASED:
+    input:
+        expectedCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
+        observedCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+        probabilities = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/scores.probabilistic_cov.tsv',
+        kmerError = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/kmer_error.txt'
+    output:
+        errors = 'data/output/'+config['input_folder']+'/methodAnalysis/{kmer}/{id}/kmerErrorDistributions.svg',
+        deviations = 'data/output/'+config['input_folder']+'/methodAnalysis/{kmer}/{id}/countDeviations.svg'
+    params:
+        gt = lambda wildcards : getGroundTruthType(wildcards.id),
+        #cluster execution
+        cpus = '1',
+        mem = '64G',
+        gpus = '0',
+        walltime = '00:30:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    log:
+        'logs/'+config['input_folder']+'/methodAnalysis/{kmer}/{id}/kmerErrorDistributions.svg'
+    script:
+        '../scripts/createKmerErrorDistributionPlots.py'
+
+
+rule likelihoodAnalysis_COVERAGE_BASED:
+    input:
+        expectedCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
+        observedCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+        probabilities = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/scores.probabilistic_cov.tsv',
+        kmerError = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/kmer_error.txt'
+    output:
+        likelihoodAnalysis = 'data/output/'+config['input_folder']+'/methodAnalysis/{kmer}/{id}/likelihoodAnalysis.txt'
+    params:
+        gt = lambda wildcards : getGroundTruthType(wildcards.id)
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    log:
+        'logs/'+config['input_folder']+'/methodAnalysis/{kmer}/{id}/likelihoodAnalysis.txt'
+    script:
+        '../scripts/likelihoodBreakdown.py'
+
+rule mapAgainstGroundTruth:
+    input:
+        filteredReads = 'data/auxiliary/'+config['input_folder']+'/{id}/filteredReads.fastq',
+        groundTruthSequence = lambda wildcards: 'data/input/ref/'+getGroundTruthType(wildcards.id)+'.fa',
+        groundTruthIndex = lambda wildcards: 'data/input/ref/'+getGroundTruthType(wildcards.id)+'.fa.bwt'
+    output:
+        'data/output/'+config['input_folder']+'/methodAnalysis/{id}/alignmentToGroundTruthType.bam'
+    params:
+        # cluster execution
+        cpus = '1',
+        mem = '64G',
+        gpus = '0',
+        walltime = '00:30:00'
+    singularity:
+        'docker://biocontainers/bwa:v0.7.17-3-deb_cv1'
+    shell:
+        'bwa mem {input.groundTruthSequence} {input.filteredReads} -o {output}'
+
+rule verifyUniqueness:
+    input:
+        kmerCounts = 'data/auxiliary/kmers/{kmer}/spaSequences.counts.json',
+        maskedReference = 'data/auxiliary/maskedRef.fa'
+    output:
+        report('data/output/kmers/{kmer}/uniquenessTest.tsv',category='kmerUniqueness')
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    params:
+        k = lambda wildcards : wildcards.kmer,
+        # cluster execution
+        cpus = '1',
+        mem = '8G',
+        gpus = '0',
+        walltime = '00:30:00'
+    script:
+        '../scripts/verifyUniqueness.py'
+
+rule analyzeMapping:
+    input:
+        read1 = 'data/auxiliary/'+config['input_folder']+'/{id}'+'.qc'+config['input_read_1_ending'],
+        read2 = 'data/auxiliary/'+config['input_folder']+'/{id}'+'.qc'+config['input_read_2_ending'],
+        filteredAlignment = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.filtered.bam',
+        idx = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.filtered.bam.bai',
+        metaInf = lambda wildcards : 'data/input/'+config['input_folder']+'/syntheticReferencesMetaData/'+getGroundTruthType(wildcards.id)+'.meta'
+    output:
+        correctAlignments = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/correctMapping.fa',
+        analysis = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/mapping.comparison'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    params:
+        # cluster execution
+        cpus = '1',
+        mem = '1G',
+        gpus = '0',
+        walltime = '00:10:00'
+    script:
+        '../scripts/analyzeMapping.py'
+
+rule makeKmerProfilesFromTrueReads:
+    input:
+        filteredReads = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/correctMapping.fa',
+        regionXMetaData = lambda wildcards : 'data/input/'+config['input_folder']+'/syntheticReferencesMetaData/'+getGroundTruthType(wildcards.id)+'.meta'
+    output:
+        counts = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/{kmer}/correctCounts.json',
+        origins = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/{kmer}/kmerOrigins.json'
+    params:
+        k = lambda wildcards: wildcards.kmer
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/makeKmerProfilesFromTrueReads.py'
+
+rule compareObservedKmerProfileToTrueProfile:
+    input:
+        trueCounts = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/{kmer}/correctCounts.json',
+        observedCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json'
+    output:
+        differences = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/{kmer}/differences_observed.txt'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/compareKmerCounts.py'
+
+rule compareExpectedKmerProfileToObserved:
+    input:
+        trueCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+        expectedCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
+        groundTruthFile = 'data/input/' + config['ground_truth']
+    output:
+        differences = 'data/output/'+config['input_folder']+'/methodAnalysis/{id}/{kmer}/differences_observed_expected.txt'
+    params:
+        inputFileID = lambda wildcards: wildcards.id
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/compareKmerCounts_expected.py'
+
+
+rule makeSequenceProfiles:
+    input:
+        sequences = 'data/auxiliary/spaSequences.fa'
+    output:
+        profiles = 'data/auxiliary/kmers/{kmer}/spaSequences.kmerprofiles.json',
+        counts = 'data/auxiliary/kmers/{kmer}/spaSequences.counts.json'
+    params:
+        k = lambda wildcards: wildcards.kmer,
+        # cluster execution
+        cpus = '1',
+        mem = '32G',
+        gpus = '0',
+        walltime = '00:30:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/makeKmerProfiles.py'
+
+
+rule calcAverageReadLength:
+    input:
+        read1 = 'data/input/'+config['input_folder']+'/{id}'+config['input_read_1_ending']
+    output:
+        'data/auxiliary/'+config['input_folder']+'/{id}/readLengthEstimate.txt'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    shell:
+        'awk \' {{ if(NR%4==2) {{count++; bases += length}} }} END{{print bases/count}} \' {input.read1}  > {output}' #todo: use both read files?
+    
+        
+
+
+rule createValidKmerHistogram:
+    input:
+        expected = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
+        observed = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json'
+    output:
+        histogram = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/validKmersHisto.svg'
+    params:
+        gtt = lambda wildcards : getGroundTruthType(wildcards.id)
+        
+    log:
+        'logs/'+config['input_folder']+'/probabilistic/kmers/{kmer}/{id}/validKmersHisto.log'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/createValidKmerHistogram.py'
+
+
+rule calcKmerErrorRates:
+    input:
+        baseError = 'data/auxiliary/'+config['input_folder']+'/{id}/base_error_estimate.txt'
+    output:
+        error = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/error_estimate.txt'
+    params:
+        k = lambda wildcards: wildcards.kmer
+    log:
+        'logs/'+config['input_folder']+'/kmers/{kmer}/{id}/calcKmerErrorRates.log'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/calcKmerErrorRate.py'
+
+
+if config['skipMapping']:
+    rule makeReadProfiles:
+        input:
+            expectedCounts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
+            read1 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_1_ending'],
+            read2 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_2_ending']
+        output:
+            profile = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.profile.json',
+            counts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json'
+        params:
+            k = lambda wildcards: wildcards.kmer,
+            #cluster execution
+            cpus = '1',
+            mem = '32G',
+            gpus = '0',
+            walltime = '00:30:00'
+        log:
+            'logs/'+config['input_folder']+'/kmers/{kmer}/{id}/makeReadProfiles.log'
+        conda:
+            '../envs/biopythonworkbench.yaml'
+        script:
+            '../scripts/makeKmerProfilesFromFastq.py'
+
+else:			
+    rule makeReadProfiles:
+        input:
+            alignment = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.filtered.bam',
+            read1 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_1_ending'],
+            read2 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_2_ending'],
+            index = 'data/auxiliary/'+config['input_folder']+'/{id}/alignment.filtered.bam.bai', #ghost input
+            regions = 'data/auxiliary/syntheticProteinAs.meta'
+        output:
+            profile = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.profile.json',
+            counts = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+            debug = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignmentExtraction.txt'
+            #local_coverage_estimate = 'data/auxiliary/kmers/{kmer}/{id}/local_coverage_estimate.txt'
+        params:
+            k = lambda wildcards: wildcards.kmer,
+            #cluster execution
+            cpus = '1',
+            mem = '32G',
+            gpus = '0',
+            walltime = '00:30:00'
+        log:
+            'logs/'+config['input_folder']+'/kmers/{kmer}/{id}/makeReadProfiles.log'
+        conda:
+            '../envs/biopythonworkbench.yaml'
+        script:
+            '../scripts/makeKmerProfileFromSam.py'
+        
+
+rule createRatios:
+    input:
+        'data/auxiliary/kmers/{kmer}/spaSequences.counts.json'
+    output:
+        'data/auxiliary/kmers/{kmer}/spaSequencesRatios.json'
+    params:
+        k = lambda wildcards: wildcards.kmer,
+        #cluster execution
+        cpus = '1',
+        mem = '8G',
+        gpus = '0',
+        walltime = '00:15:00'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/calculateKmerRatios.py'
+

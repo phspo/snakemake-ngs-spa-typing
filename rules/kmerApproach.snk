@@ -7,6 +7,15 @@ def determineKmerCoverageEstimateFile():
     elif config['kmerCoverageEstimationMethod'] == 'countPoisson':
         return 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/coverage_estimate_kmercountbased.txt'
 
+# TODO: will need arg spatyp later
+def determineIterationset():
+    if config['iterationset'] == 'observation':
+        return 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json'
+    elif config['iterationset'] == 'spatype':
+        return '?'
+    elif config['iterationset'] == 'database':
+        return '?'
+
 # Returns the corresponding ground truth spa-type for a given file (sample) id
 def getGroundTruthType(fid):
     with open('data/input/groundTruth.tsv','r') as gtfile:

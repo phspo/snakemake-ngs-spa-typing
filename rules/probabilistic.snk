@@ -64,6 +64,7 @@ rule calcLikelihoods:
     input:
         expected = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/expected_counts.json',
         observed = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/alignment.counts.json',
+        iterationset = determineIterationset({id}}),
         kmerError = 'data/auxiliary/'+config['input_folder']+'/kmers/{kmer}/{id}/kmer_error.txt',
         kmerCoverageEstimate = determineKmerCoverageEstimateFile()
     output:

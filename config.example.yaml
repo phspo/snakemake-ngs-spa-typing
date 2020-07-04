@@ -95,3 +95,7 @@ blast_word_size : 4
 blast_word_size_hypProtA : 11
 blast_e_value : 1.0e-40
 blast_e_value_hypProtA : 1.0e-50
+
+
+### Choose Iterationset to determine likelihoods
+iterationset : observation

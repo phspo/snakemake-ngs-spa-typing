@@ -1,27 +1,25 @@
-rule
-spades:
-input:
-read1 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_1_ending'],
-read2 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_2_ending']
-output:
-directory('data/auxiliary/' + config['input_folder'] + '/{id}/spades')
-singularity:
-'docker://pegi3s/spades:latest'
-shell:
-'spades.py -1 {input.read1} -2 {input.read2} -o {output} --phred-offset 33' + (
-	(' --trusted-contigs ' + 'data/input/' + config['reference_genome'] + '/' + config['genome_file_identifier']) if
-	config['reference_guided_assembly'] else '')
+rule spades:
+    input:
+        read1 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_1_ending'],
+        read2 = 'data/auxiliary/' + config['input_folder'] + '/{id}' + '.qc' + config['input_read_2_ending']
+    output:
+        directory('data/auxiliary/' + config['input_folder'] + '/{id}/spades')
+    singularity:
+        'docker://pegi3s/spades:latest'
+    shell:
+        'spades.py -1 {input.read1} -2 {input.read2} -o {output} --phred-offset 33' + (
+        (' --trusted-contigs ' + 'data/input/' + config['reference_genome'] + '/' + config['genome_file_identifier']) if
+        config['reference_guided_assembly'] else '')
 
-rule
-exactMatch:
-input:
-infolder = 'data/auxiliary/' + config['input_folder'] + '/{id}/spades'
-output:
-'data/output/' + config['input_folder'] + '/{id}/exactMatches.tsv'
-params:
-spaSeqs = 'data/auxiliary/spaSequences.fa',
-scaffolds = 'data/auxiliary/' + config['input_folder'] + '/{id}/spades/scaffolds.fasta'
-conda:
-'../envs/biopythonworkbench.yaml'
-script:
-'../scripts/spaSequenceSearch.py'
+rule exactMatch:
+    input:
+        infolder = 'data/auxiliary/' + config['input_folder'] + '/{id}/spades'
+    output:
+        'data/output/' + config['input_folder'] + '/{id}/exactMatches.tsv'
+    params:
+        spaSeqs = 'data/auxiliary/spaSequences.fa',
+        scaffolds = 'data/auxiliary/' + config['input_folder'] + '/{id}/spades/scaffolds.fasta'
+    conda:
+        '../envs/biopythonworkbench.yaml'
+    script:
+        '../scripts/spaSequenceSearch.py'
